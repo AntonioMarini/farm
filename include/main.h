@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 /**
  * @brief handles the options passed to the program
@@ -49,12 +51,31 @@ void handleQueueLengthOpt(const char* opt);
 void handleDelayOpt(const char* opt);
 
 /**
- * @brief checks if a given string is a number
+ * @brief checks if a given string is a number.
  * 
  * @param value string to check
  * 
  * @return 1 if the string is a number, -1 otherwise
  */
 int isNumber(const char * value);
+
+/**
+ * @brief print options received
+ * 
+ */
+void printOptions();
+
+/**
+ * @brief creates a list of filenames inside a given directory
+ * @param dirPath 
+ * @return char** 
+ */
+char** listFilesInsideDirectory(const char* dirPath, int size);
+
+int countFilesInsideDirectory(char* dirPath);
+
+void closeDir(DIR* dir);
+
+void cleanup();
 
 #endif
