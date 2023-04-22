@@ -2,6 +2,8 @@
 #define MACRO_H
 
 #include<stdlib.h>
+#include<string.h>
+#include<time.h>
 
 #define error_minusone(exp,msg,cmd) if((exp) == -1){perror(msg); cmd;}
 

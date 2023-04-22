@@ -12,8 +12,6 @@ Queue* init_queue(int size){
     pthread_cond_init(&(queue->cond_empty), NULL);
     pthread_cond_init(&(queue->cond_full), NULL);
 
-    printf("size: %d , count: %d\n", queue->size, queue->count);
-
     return queue;
 }
 
@@ -27,10 +25,7 @@ int isQueueFull(Queue queue){
 
 void insertNewTask(Queue* queue, Task* task){
     Mutex_lock(&(queue->mtx));
-
-    printf("Inserting task...\n");
-
-    printf("size: %d , count: %d\n", queue->size, queue->count);
+    //printf("master: waiting to insert new task\n");
     while(isQueueFull(*queue))
         Cond_wait(&(queue->cond_full), &(queue->mtx));
     queue->tasks[queue->count++] = task;
@@ -41,12 +36,8 @@ void insertNewTask(Queue* queue, Task* task){
 
 Task* removeTask(Queue* queue){
     Mutex_lock(&(queue->mtx));
-
-    printf("Removing task...\n");
-
     while (isQueueEmpty(*queue))
         Cond_wait(&(queue->cond_empty), &(queue->mtx));
-    printf("Removing task %d\n", queue->count);
     Task* task = queue->tasks[--queue->count];
     
     Cond_signal(&queue->cond_full);

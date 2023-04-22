@@ -15,5 +15,5 @@ void destroyTask(Task* task){
 }
 
 void printTaskInfo(Task task){
-    printf("Task %d: %s\n",task.task_id,task.filepath);
+    fprintf(stdout, "Task %d: %s\n",task.task_id,task.filepath);
 }

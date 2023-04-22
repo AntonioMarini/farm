@@ -1,11 +1,20 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#define _XOPEN_SOURCE 700
+
+#include "constants.h"
+#include "master.h"
+#include "worker.h"
+#include "safe_memory.h"
+#include "macro.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <signal.h>
 
 /**
  * @brief handles the options passed to the program
@@ -51,31 +60,23 @@ void handleQueueLengthOpt(const char* opt);
 void handleDelayOpt(const char* opt);
 
 /**
- * @brief checks if a given string is a number.
- * 
- * @param value string to check
- * 
- * @return 1 if the string is a number, -1 otherwise
- */
-int isNumber(const char * value);
-
-/**
  * @brief print options received
  * 
  */
 void printOptions();
 
 /**
- * @brief creates a list of filenames inside a given directory
- * @param dirPath 
- * @return char** 
+ * @brief creates a list of filenames inside a given directory, visiting it recursively
+ * @return  
  */
-char** listFilesInsideDirectory(const char* dirPath, int size);
-
-int countFilesInsideDirectory(char* dirPath);
+void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList ,int* count);
 
 void closeDir(DIR* dir);
 
 void cleanup();
+
+void gestore (int signum);
+
+void destroyAllWorkers();
 
 #endif
