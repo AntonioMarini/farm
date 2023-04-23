@@ -4,7 +4,7 @@ Master* init_master(char** fileNames, Queue* queue, int numTasks){
     Master* master = (Master*) safe_alloc(sizeof(Master));
     master->queue = queue;
     master->numTasks = numTasks;
-    master->tid = -1;
+    master->tid = (pthread_t) -1;
     //printf("%d tasks\n",master->numTasks);
     createTasksFromFiles(master, fileNames);
     return master;
@@ -63,6 +63,3 @@ void destroy_master(Master* master){
     destroyQueue(master->queue);
     free(master);
 }
-
-
-

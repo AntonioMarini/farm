@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <pthread.h>
+#include <poll.h>
 
 int numWorkers = N_WORKERS_DEFAULT;
 int queueLength =  CONCURRENT_QUEUE_LENGHT_DEFAULT;
@@ -20,6 +21,8 @@ Worker** workers;
 Queue* queue = NULL;
 
 char** filesList;
+
+struct pollfd pfd;
 
 int main(int argc, char *argv[])
 {
@@ -37,17 +40,13 @@ int main(int argc, char *argv[])
         collectorCicle();
         
     }else{
-        // MasterWorker deve gestire i segnali SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1
-        struct sigaction s; 
-        /* inizializzo s a 0*/
-        memset( &s, 0, sizeof(s) );
-        s.sa_handler=gestore; /* registro gestore */
-        /* installo nuovo gestore s */
-        //error_minusone( sigaction(SIGINT,&s,NULL),"sigaction", exit(EXIT_FAILURE));
+        // MasterWorker must handle SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1
+        setSignalHandlers();
+
         queue = init_queue(queueLength);
         // parent: masterworker
 
-        // initialize the connection
+        // initialize the connection 
         int sockfd, connfd;
         socklen_t len;
         struct sockaddr_un servaddr, cliaddr;
@@ -75,6 +74,7 @@ int main(int argc, char *argv[])
         int size  = 0;
         listFilesInsideDirectoryRec(dirPath,&filesList, &size);
 
+        // notify collector process about how many files do we have to work on
         char buf[256];
         sprintf(buf,"%d", size);
         int n = write(connfd, buf, strlen(buf));
@@ -95,17 +95,34 @@ int main(int argc, char *argv[])
         // 4) start the master thread
         start_master(master);
 
+                // 5) start the workers threadpool
+
         for(int i = 0; i < numWorkers; i++)
             Thread_create(&(workers[i]->tid), worker_thread, workers[i]);
 
-        // 6) connect the two processes using a socket connection
-
-        // 7) start the workers threadpool
-        Thread_join(master->tid, NULL);
-
-        for(int i = 0; i < numWorkers; i++){
-            Thread_join(workers[i]->tid, NULL);
+            // monitor the socket for events
+    pfd.fd = connfd;
+    pfd.events = POLLIN | POLLHUP | POLLERR;
+    while (1) {
+        // wait for an event
+        if (poll(&pfd, 1, -1) == -1) {
+            perror("poll");
+            exit(EXIT_FAILURE);
         }
+
+        if (pfd.revents & POLLHUP) {
+            // client has closed the connection
+            printf("Client closed the connection.\n");
+            close(connfd);
+            break;
+        } else if (pfd.revents & POLLERR) {
+            // an error has occurred
+            printf("Socket error.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+        Thread_join(master->tid, NULL);
 
         // Close the connection and the socket
         close(connfd);
@@ -116,6 +133,22 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+}
+
+void setSignalHandlers(){
+    struct sigaction s; 
+        memset( &s, 0, sizeof(s) );
+        s.sa_handler=gestore; 
+
+    error_minusone(sigaction(SIGINT,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGHUP,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGQUIT,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGTERM,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+
+    struct sigaction sUsr; 
+        memset( &sUsr, 0, sizeof(sUsr) );
+        sUsr.sa_handler=gestoreUsr1; 
+    error_minusone(sigaction(SIGUSR1,&s,NULL), "sigaction", exit(EXIT_FAILURE));
 }
 
 void handleOptions(int argc, char *argv[]){
@@ -286,12 +319,25 @@ void cleanup(){
 /* un gestore piuttosto semplice */
 void gestore (int signum) {
     printf("Ricevuto segnale %d\n",signum);
+
+
     // killa i threads 
     destroyAllWorkers(); 
     destroyQueue(queue);
     cleanup();
     exit(EXIT_FAILURE);
 }
+
+/* un gestore piuttosto semplice */
+void gestoreUsr1 (int signum) {
+    printf("Ricevuto segnale %d\n",signum);
+    // killa i threads 
+    destroyAllWorkers(); 
+    destroyQueue(queue);
+    cleanup();
+    exit(EXIT_FAILURE);
+}
+
 
 void destroyAllWorkers(){
     for(int i = 0; i < numWorkers; i++){

@@ -1,7 +1,8 @@
 #include "../include/collector.h"
 #include "unistd.h"
+#include "../../masterworker/include/macro.h"
 
-// Function to compare two Result structs by value (ascendending order)
+// Function to compare two Result structs by value (ascending order)
 int compare_values(const void* a, const void* b) {
     Result* r1 = (Result*)a;
     Result* r2 = (Result*)b;
@@ -32,7 +33,7 @@ void collectorCicle(){
     int numFiles;
     n = read(sockfd, buf, sizeof(buf));
     if (n == -1) {
-        perror("write");
+        perror("read");
         exit(EXIT_FAILURE);
     }
     buf[n] = '\0';
@@ -49,7 +50,7 @@ void collectorCicle(){
         memset(buf, 0, sizeof(buf));
         n = read(sockfd, buf, sizeof(buf));
         if (n == -1) {
-            perror("write");
+            perror("read");
             exit(EXIT_FAILURE);
         }
         buf[n] = '\0';

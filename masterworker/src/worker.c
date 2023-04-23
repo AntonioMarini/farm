@@ -36,7 +36,7 @@ void processTask(Task* task, int connfd){
     FILE* fp = fopen(filepath, "rb");
     long count = 0;
     long number;
-    int i;
+    int i = 0;
 
     if(fp == NULL){
         perror("opening file");

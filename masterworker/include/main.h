@@ -17,6 +17,11 @@
 #include <signal.h>
 
 /**
+ * Sets signal handlers needed to gracefully kill the process
+ */
+void setSignalHandlers();
+
+/**
  * @brief handles the options passed to the program
  * 
  * @param argc the number of arguments
@@ -76,6 +81,8 @@ void closeDir(DIR* dir);
 void cleanup();
 
 void gestore (int signum);
+
+void gestoreUsr1 (int signum);
 
 void destroyAllWorkers();
 
