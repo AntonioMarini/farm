@@ -18,9 +18,8 @@ void* safe_realloc(void *ptr, size_t size){
     return (ptr);
 }
 
-void safe_free(void**pointer_ptr){
-    if(pointer_ptr != NULL && *pointer_ptr != NULL){
-        free(*pointer_ptr);
-        *pointer_ptr = NULL;
+void safe_free(void*pointer_ptr){
+    if(pointer_ptr != NULL){
+        free(pointer_ptr);
     }
 }

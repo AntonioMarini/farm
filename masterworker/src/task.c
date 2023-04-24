@@ -10,8 +10,8 @@ Task* init_task(char* filepath, int task_id){
 }
 
 void destroyTask(Task* task){
-    free(task->filepath);
-    free(task);
+    safe_free(task->filepath);
+    safe_free(task);
 }
 
 void printTaskInfo(Task task){

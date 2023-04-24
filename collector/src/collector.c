@@ -24,9 +24,8 @@ void collectorCicle(){
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sun_family = AF_UNIX;
     strncpy(servaddr.sun_path, SOCKET_PATH, sizeof(servaddr.sun_path) - 1);
-    if (connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
-        perror("connect");
-        exit(EXIT_FAILURE);
+    printf("Trying to connect...\n");
+    while (connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
     }
 
     char buf[256];
@@ -45,7 +44,7 @@ void collectorCicle(){
     }
 
     Result resultsMap[numFiles];
-
+    
     for(int i = 0; i < numFiles; i++) {
         memset(buf, 0, sizeof(buf));
         n = read(sockfd, buf, sizeof(buf));
@@ -54,7 +53,12 @@ void collectorCicle(){
             exit(EXIT_FAILURE);
         }
         buf[n] = '\0';
-        resultsMap[i] = createResultFromResponse(buf);      
+
+        if(isMessageBlock(buf)){
+            numFiles -= getRemainingFilesNum(buf);
+            i--;
+        }
+        else resultsMap[i] = createResultFromResponse(buf);      
     }
 
     // Sort the map by value
@@ -68,6 +72,30 @@ void collectorCicle(){
     // Close the socket
     printf("Collector: bye\n");
     close(sockfd);
+}
+
+int getRemainingFilesNum(char* blockMessage){
+    char* delimiter = ":"; // The delimiter is a colon
+    char* saveptr;
+    char* token;
+
+    // Get the first token using strtok_r
+    token = strtok_r(blockMessage, delimiter, &saveptr);
+
+    // Get the second token which is the number
+    token = strtok_r(NULL, delimiter, &saveptr);
+
+    // Convert the token to an integer
+    int num = atoi(token);
+
+    return num;
+}
+
+int isMessageBlock(char* message){
+    char* block = "block";
+    char* ptr = strstr(message, block);
+
+    return (ptr!=NULL);
 }
 
 Result createResultFromResponse(char* response){

@@ -29,6 +29,6 @@ void* safe_realloc(void* ptr, size_t newsize);
  * @brief safely frees memory
  * 
  */
-void safe_free(void** pointer_ptr);
+void safe_free(void* pointer_ptr);
 
 #endif

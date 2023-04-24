@@ -56,7 +56,7 @@ void processTask(Task* task, int connfd){
 }
 
 void destroyWorker(Worker* worker){
-    free(worker);
+    safe_free(worker);
 }
 
 void sendToCollector(int connfd, char* message){  

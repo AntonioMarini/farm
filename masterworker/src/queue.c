@@ -4,6 +4,7 @@
 Queue* init_queue(int size){
     Queue* queue = (Queue*) safe_alloc(sizeof(Queue));
 
+    queue->isOpen = 1;
     queue->size = size;
     queue->count = 0;
     queue->tasks = (Task**) safe_alloc(sizeof(Task*) * queue->size);
@@ -53,11 +54,11 @@ void destroyQueue(Queue* queue){
         t=removeTask(queue);
         destroyTask(t);
     }
-    free(queue->tasks);
+    safe_free(queue->tasks);
     pthread_cond_destroy(&(queue->cond_empty));
     pthread_cond_destroy(&(queue->cond_full));
     pthread_mutex_destroy(&(queue->mtx));
-    free(queue);
+    safe_free(queue);
 }
 
 void printQueue(Queue queue){
@@ -66,4 +67,8 @@ void printQueue(Queue queue){
         printTaskInfo(*(queue.tasks[i]));
         printf("\n");
     }
+}
+
+void closeQueue(Queue* queue){
+    queue->isOpen = 0;
 }

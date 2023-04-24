@@ -15,15 +15,20 @@ void start_master(Master* master){
 }
 
 void* master_thread(void* arg){
-    //printf("I am master thread\n");
 
     struct timespec sleepTime;
     sleepTime.tv_sec = 0;
-    sleepTime.tv_nsec = 500 * 1000000; // nanoseconds (500 milliseconds)
+    sleepTime.tv_nsec = 300 * 1000000; // nanoseconds (300 milliseconds)
 
     Master* master = (Master*) arg;
+    // every x nanoseconds insert one task in the queue
     while(master->numTasks>0){
-        putNTasks(master, 1);
+        if(!(master->queue->isOpen)){ // if queue has been blocked we do nothing and exit this thread 
+            printf("Cannot insert new task: queue is blocked.\n");
+            break;
+        }
+        putNTasks(master, 1); 
+        printf("new task inserted\n");
         nanosleep(&sleepTime, NULL);
     }
 
@@ -59,7 +64,7 @@ void destroy_master(Master* master){
         t = removeTaskFromMaster(master);
         destroyTask(t);
     }
-    free(master->allTasks);
+    safe_free(master->allTasks);
     destroyQueue(master->queue);
-    free(master);
+    safe_free(master);
 }

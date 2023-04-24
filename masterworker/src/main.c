@@ -23,12 +23,17 @@ Queue* queue = NULL;
 char** filesList;
 
 struct pollfd pfd;
+int sockfd, connfd;
 
 int main(int argc, char *argv[])
 {
     //1)
     handleOptions(argc, argv);
-    //checkIfFilesAreValid(dirPath);
+
+    // list of all files
+    int size  = 0;
+        listFilesInsideDirectoryRec(dirPath,&filesList, &size);
+
     //printOptions();
 
     pid_t pid = fork();
@@ -36,7 +41,8 @@ int main(int argc, char *argv[])
         perror("fork");
         exit(EXIT_FAILURE);
     } else if(pid == 0){
-        // child: just start collector here
+        // child: set new signal mask and start collector here
+        signal(SIGINT, SIG_IGN);
         collectorCicle();
         
     }else{
@@ -47,18 +53,17 @@ int main(int argc, char *argv[])
         // parent: masterworker
 
         // initialize the connection 
-        int sockfd, connfd;
         socklen_t len;
         struct sockaddr_un servaddr, cliaddr;
 
          // Create a socket
+        unlink(SOCKET_PATH);
         error_minusone(sockfd = socket(AF_UNIX, SOCK_STREAM, 0), "socket", exit(EXIT_FAILURE));
 
         // Bind the socket to a local path
         memset(&servaddr, 0, sizeof(servaddr));
         servaddr.sun_family = AF_UNIX;
         strncpy(servaddr.sun_path, SOCKET_PATH, sizeof(servaddr.sun_path) - 1);
-        unlink(SOCKET_PATH);
         error_minusone(bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)), "bind", exit(EXIT_FAILURE));
         
         // Listen for incoming connections
@@ -68,11 +73,6 @@ int main(int argc, char *argv[])
         len = sizeof(cliaddr);
         error_minusone(connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &len), "accept", exit(EXIT_FAILURE));
         printf("Connected\n");
-
-        // Receive data from the client
-        
-        int size  = 0;
-        listFilesInsideDirectoryRec(dirPath,&filesList, &size);
 
         // notify collector process about how many files do we have to work on
         char buf[256];
@@ -99,30 +99,30 @@ int main(int argc, char *argv[])
 
         for(int i = 0; i < numWorkers; i++)
             Thread_create(&(workers[i]->tid), worker_thread, workers[i]);
-
-            // monitor the socket for events
-    pfd.fd = connfd;
-    pfd.events = POLLIN | POLLHUP | POLLERR;
-    while (1) {
-        // wait for an event
-        if (poll(&pfd, 1, -1) == -1) {
-            perror("poll");
-            exit(EXIT_FAILURE);
-        }
-
-        if (pfd.revents & POLLHUP) {
-            // client has closed the connection
-            printf("Client closed the connection.\n");
-            close(connfd);
-            break;
-        } else if (pfd.revents & POLLERR) {
-            // an error has occurred
-            printf("Socket error.\n");
-            exit(EXIT_FAILURE);
-        }
-    }
-
+        
         Thread_join(master->tid, NULL);
+
+
+        // monitor the socket for events
+        pfd.fd = connfd;
+        pfd.events = POLLIN | POLLHUP | POLLERR;
+        while (1) {
+            // wait for an event
+            if (poll(&pfd, 1, -1) == -1) {
+                perror("poll");
+            }
+
+            if (pfd.revents & POLLHUP) {
+                // client has closed the connection
+                printf("Client closed the connection.\n");
+                close(connfd);
+                break;
+            } else if (pfd.revents & POLLERR) {
+                // an error has occurred
+                printf("Socket error.\n");
+                exit(EXIT_FAILURE);
+            }
+        }
 
         // Close the connection and the socket
         close(connfd);
@@ -137,8 +137,8 @@ int main(int argc, char *argv[])
 
 void setSignalHandlers(){
     struct sigaction s; 
-        memset( &s, 0, sizeof(s) );
-        s.sa_handler=gestore; 
+    memset( &s, 0, sizeof(s) );
+    s.sa_handler=gestore; 
 
     error_minusone(sigaction(SIGINT,&s,NULL), "sigaction", exit(EXIT_FAILURE));
     error_minusone(sigaction(SIGHUP,&s,NULL), "sigaction", exit(EXIT_FAILURE));
@@ -283,15 +283,15 @@ void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList,int* cou
         if (dirFile->d_type == 4) {
             listFilesInsideDirectoryRec(fullPath, filesList, count);
         }
-        // if the entry is a file, add its name to the list
-        else if (dirFile->d_type == 8) {
+        // if the entry is a file and has a .dat extension, add its name to the list
+        else if (dirFile->d_type == 8 && isBinaryFile(dirFile->d_name)) {
             (*filesList) = (char**) safe_realloc((*filesList), (*count + 1) * sizeof(char*));
             (*filesList)[*count] = safe_alloc(strlen(fullPath) + 1);
             strncpy((*filesList)[*count], fullPath, strlen(fullPath) + 1);
             (*count)++;           
         }
 
-        free(fullPath);
+        safe_free(fullPath);
     }
     if (errno != 0) {
         perror("Reading directory");
@@ -299,6 +299,11 @@ void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList,int* cou
     }
 
     closeDir(dir);
+}
+
+int isBinaryFile(char* filename){
+    // check if the filename ends with ".dat"
+    return (strstr(filename, ".dat") != NULL);
 }
 
 void closeDir(DIR* dir){
@@ -311,38 +316,36 @@ void closeDir(DIR* dir){
 void cleanup(){
     destroy_master(master);
     destroyAllWorkers(); 
-    free(filesList);
+    safe_free(filesList);
 }
 
 // GESTORI SEGNALI
 
-/* un gestore piuttosto semplice */
 void gestore (int signum) {
-    printf("Ricevuto segnale %d\n",signum);
-
-
-    // killa i threads 
-    destroyAllWorkers(); 
-    destroyQueue(queue);
-    cleanup();
-    exit(EXIT_FAILURE);
+    // blocca la coda dei tasks.
+    // manda un messaggio al collector con il numero di file che non verranno calcolati
+    // in modo che esso possa aggiornare il suo ciclo di attesa
+    closeQueue(master->queue);
+    char dataToSend[256];
+    memset(dataToSend, 0, sizeof(dataToSend));
+    int countRemaining = master->numTasks;
+    printf("Sending tasks remaining: %d\n", countRemaining);
+    sprintf(dataToSend, "block:%d", countRemaining);
+    error_minusone(write(connfd, dataToSend, strlen(dataToSend) + 1), "write on socket", pthread_exit((void*) 1));
 }
 
-/* un gestore piuttosto semplice */
 void gestoreUsr1 (int signum) {
-    printf("Ricevuto segnale %d\n",signum);
-    // killa i threads 
+    // killa i workers 
     destroyAllWorkers(); 
     destroyQueue(queue);
     cleanup();
     exit(EXIT_FAILURE);
 }
-
 
 void destroyAllWorkers(){
     for(int i = 0; i < numWorkers; i++){
         error_minusone(pthread_cancel(workers[i]->tid), "kill thread", exit(EXIT_FAILURE));
         destroyWorker(workers[i]);
     }
-    free(workers);
+    safe_free(workers);
 }

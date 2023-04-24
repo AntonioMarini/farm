@@ -84,6 +84,11 @@ void gestore (int signum);
 
 void gestoreUsr1 (int signum);
 
+/**
+ * @brief checks if a given file is a binary file
+ */
+int isBinaryFile(char* filename);
+
 void destroyAllWorkers();
 
 #endif

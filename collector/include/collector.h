@@ -26,4 +26,8 @@ Result createResultFromResponse(char* response);
 
 void collectorCicle();
 
+int getRemainingFilesNum(char* blockMessage);
+
+int isMessageBlock(char* message);
+
 #endif

@@ -8,6 +8,7 @@
 typedef struct Queue{
     int count;
     int size;
+    int isOpen; // flag used to block the execution of the tasks in the queue
     pthread_mutex_t mtx;
     pthread_cond_t cond_empty;
     pthread_cond_t cond_full;
@@ -50,6 +51,11 @@ Task* removeTask(Queue* queue);
  * @param queue queue to be detroyed
  */
 void destroyQueue(Queue* queue);
+
+/**
+ * @brief blocks the queue so the workers won't receive new tasks
+ */ 
+void closeQueue(Queue* queue);
 
 /**
  * @brief prints to stdout info about the queue of tasks
