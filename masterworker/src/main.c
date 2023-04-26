@@ -1,5 +1,6 @@
 #include "../include/main.h"
 #include "../../collector/include/collector.h"
+#include "../include/util.h"
 
 #include <unistd.h>
 #include <getopt.h>
@@ -21,21 +22,22 @@ Worker** workers;
 Queue* queue = NULL;
 
 char** filesList;
+int numFiles = 0;
 
 struct pollfd pfd;
 int sockfd, connfd;
 
+pthread_mutex_t connectionMtx;
+
 int main(int argc, char *argv[])
 {
     //1)
-    handleOptions(argc, argv);
+    handleOptions(argc, argv);    
 
     // list of all files
-    int size  = 0;
-        listFilesInsideDirectoryRec(dirPath,&filesList, &size);
+    listFilesInsideDirectoryRec(dirPath,&filesList);
 
     //printOptions();
-
     pid_t pid = fork();
     if(pid == -1){
         perror("fork");
@@ -43,6 +45,11 @@ int main(int argc, char *argv[])
     } else if(pid == 0){
         // child: set new signal mask and start collector here
         signal(SIGINT, SIG_IGN);
+        signal(SIGQUIT, SIG_IGN);
+        signal(SIGQUIT, SIG_IGN);
+        signal(SIGTERM, SIG_IGN);
+        signal(SIGHUP, SIG_IGN);
+
         collectorCicle();
         
     }else{
@@ -72,11 +79,10 @@ int main(int argc, char *argv[])
         // Accept incoming connections
         len = sizeof(cliaddr);
         error_minusone(connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &len), "accept", exit(EXIT_FAILURE));
-        printf("Connected\n");
 
         // notify collector process about how many files do we have to work on
         char buf[256];
-        sprintf(buf,"%d", size);
+        sprintf(buf,"%d", numFiles);
         int n = write(connfd, buf, strlen(buf));
         if(n == -1){
             perror("write to socket");
@@ -84,12 +90,13 @@ int main(int argc, char *argv[])
         }
 
         // 2) init the Master data struct
-        master = init_master(filesList, queue, size);
+        master = init_master(filesList, queue, numFiles, delayMillis);
         
         // 3) init the workers threadpool
+        Mutex_init(&connectionMtx);
         workers = (Worker**) safe_alloc(sizeof(Worker*) * numWorkers);
         for(int i = 0; i < numWorkers; i++){
-            workers[i] = init_worker(queue, i, connfd);
+            workers[i] = init_worker(queue, i, connfd, connectionMtx);
         }
 
         // 4) start the master thread
@@ -101,8 +108,6 @@ int main(int argc, char *argv[])
             Thread_create(&(workers[i]->tid), worker_thread, workers[i]);
         
         Thread_join(master->tid, NULL);
-
-
         // monitor the socket for events
         pfd.fd = connfd;
         pfd.events = POLLIN | POLLHUP | POLLERR;
@@ -114,12 +119,10 @@ int main(int argc, char *argv[])
 
             if (pfd.revents & POLLHUP) {
                 // client has closed the connection
-                printf("Client closed the connection.\n");
                 close(connfd);
                 break;
             } else if (pfd.revents & POLLERR) {
                 // an error has occurred
-                printf("Socket error.\n");
                 exit(EXIT_FAILURE);
             }
         }
@@ -191,6 +194,9 @@ void handleOptions(int argc, char *argv[]){
         }
     }
 
+    for (int i = optind; i < argc; i++) {
+        handleFileArg(argv[i]);
+    }
     
 }
 
@@ -200,7 +206,6 @@ void handleNumWorkersOpt(const char* opt){
         printf("Invalid option n, should be a number\n");
         exit(1);
     }
-    // TODO: handle cases where the number of workers is too large (or too small)
     numWorkers = n;
 }
 
@@ -210,7 +215,6 @@ void handleQueueLengthOpt(const char* opt){
         printf("Invalid option n, should be a number\n");
         exit(1);
     }
-    // TODO: handle cases where the length is too large (or too small)
     queueLength = q;
 }
 
@@ -220,13 +224,12 @@ void handleDelayOpt(const char* opt){
         printf("Invalid option n, should be a number\n");
         exit(1);
     }
-    // TODO: handle cases where delay is too large (or too small)
     delayMillis = delay;
 }
 
 void handleDirPathOpt(const char* opt){
     if(strlen(opt)>MAX_PATH){
-        printf("Too large\n");
+        printf("Too large directory path\n");
         exit(1);
     }
     strncpy(dirPath, opt, MAX_PATH);
@@ -234,6 +237,20 @@ void handleDirPathOpt(const char* opt){
         printf("%s isn't a directory path\n", dirPath);
         exit(1);
     }
+}
+
+void hadleFileArg(char* arg){
+    if(!is_regular_binary_file(arg)){
+        printf("%s isn't a binary file\n", arg);
+        exit(1);
+    }
+
+    // add this to filesList
+    filesList = (char**) safe_realloc((filesList), (numFiles + 1) * sizeof(char*));
+    filesList[numFiles] = safe_alloc(strlen(arg) + 1);
+    strncpy((filesList)[numFiles], arg, strlen(arg) + 1);
+    numFiles++;
+
 }
 
 int isValidDirPath(const char* fileName)
@@ -257,7 +274,7 @@ void printOptions(){
         printf("directory path: %s\n", dirPath);
 }
 
-void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList,int* count){
+void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList){
     DIR* dir;
     struct dirent* dirFile;
 
@@ -281,14 +298,14 @@ void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList,int* cou
 
         // if the entry is a directory, recursively traverse it
         if (dirFile->d_type == 4) {
-            listFilesInsideDirectoryRec(fullPath, filesList, count);
+            listFilesInsideDirectoryRec(fullPath, filesList);
         }
         // if the entry is a file and has a .dat extension, add its name to the list
-        else if (dirFile->d_type == 8 && isBinaryFile(dirFile->d_name)) {
-            (*filesList) = (char**) safe_realloc((*filesList), (*count + 1) * sizeof(char*));
-            (*filesList)[*count] = safe_alloc(strlen(fullPath) + 1);
-            strncpy((*filesList)[*count], fullPath, strlen(fullPath) + 1);
-            (*count)++;           
+        else if (dirFile->d_type == 8 && is_regular_binary_file(dirFile->d_name)) {
+            (*filesList) = (char**) safe_realloc((*filesList), ( + 1) * sizeof(char*));
+            (*filesList)[numFiles] = safe_alloc(strlen(fullPath) + 1);
+            strncpy((*filesList)[numFiles], fullPath, strlen(fullPath) + 1);
+            numFiles++;           
         }
 
         safe_free(fullPath);
@@ -299,11 +316,6 @@ void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList,int* cou
     }
 
     closeDir(dir);
-}
-
-int isBinaryFile(char* filename){
-    // check if the filename ends with ".dat"
-    return (strstr(filename, ".dat") != NULL);
 }
 
 void closeDir(DIR* dir){

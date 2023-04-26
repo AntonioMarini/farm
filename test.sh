@@ -54,8 +54,7 @@ mv file19.dat file8.dat testdir
 mkdir -p testdir/testdir2
 mv file111.dat file150.dat testdir/testdir2
 
-# esecuzione con 2 thread e coda lunga 1
-./farm -n 2 -q 1 file* -d testdir | grep "file*" | awk '{print $1,$2}' | diff - expected.txt
+z./farm -n 2 -q 1 file* -d testdir | grep "file*" | awk '{print $1,$2}' | diff - expected.txt
 if [[ $? != 0 ]]; then
     echo "test1 failed"
 else

@@ -14,10 +14,11 @@ typedef struct Master{
     Queue* queue;
     Task** allTasks;
     int numTasks;
+    int delayMillis;
     pthread_t tid;
 } Master;
 
-Master* init_master(char** fileNames, Queue* queue,int numTasks);
+Master* init_master(char** fileNames, Queue* queue,int numTasks, int delayMillis);
 
 void start_master(Master* master);
 

@@ -1,7 +1,8 @@
 #include "../include/master.h"
 
-Master* init_master(char** fileNames, Queue* queue, int numTasks){
+Master* init_master(char** fileNames, Queue* queue, int numTasks, int delayMillis){
     Master* master = (Master*) safe_alloc(sizeof(Master));
+    master->delayMillis = delayMillis;
     master->queue = queue;
     master->numTasks = numTasks;
     master->tid = (pthread_t) -1;
@@ -15,21 +16,18 @@ void start_master(Master* master){
 }
 
 void* master_thread(void* arg){
-
-    struct timespec sleepTime;
-    sleepTime.tv_sec = 0;
-    sleepTime.tv_nsec = 300 * 1000000; // nanoseconds (300 milliseconds)
-
     Master* master = (Master*) arg;
+    struct timespec sleepTime;
+    sleepTime.tv_sec = (int) (master->delayMillis / 1000);
+    sleepTime.tv_nsec =  (master->delayMillis % 1000) * 1000000; // nanoseconds (300 milliseconds)
     // every x nanoseconds insert one task in the queue
     while(master->numTasks>0){
         if(!(master->queue->isOpen)){ // if queue has been blocked we do nothing and exit this thread 
-            printf("Cannot insert new task: queue is blocked.\n");
             break;
         }
         putNTasks(master, 1); 
-        printf("new task inserted\n");
-        nanosleep(&sleepTime, NULL);
+        if(master->delayMillis != 0)
+            nanosleep(&sleepTime, NULL);
     }
 
     return (void*)0;

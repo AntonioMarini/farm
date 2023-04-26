@@ -24,7 +24,6 @@ void collectorCicle(){
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sun_family = AF_UNIX;
     strncpy(servaddr.sun_path, SOCKET_PATH, sizeof(servaddr.sun_path) - 1);
-    printf("Trying to connect...\n");
     while (connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
     }
 
@@ -58,7 +57,9 @@ void collectorCicle(){
             numFiles -= getRemainingFilesNum(buf);
             i--;
         }
-        else resultsMap[i] = createResultFromResponse(buf);      
+        else {
+            resultsMap[i] = createResultFromResponse(buf);
+         } 
     }
 
     // Sort the map by value
@@ -66,11 +67,10 @@ void collectorCicle(){
 
     // Print the sorted map
     for (int i = 0; i < numFiles; i++) {
-        printf("%ld: %s\n",  resultsMap[i].value, resultsMap[i].filename);
+        printf("%ld %s\n",  resultsMap[i].value, resultsMap[i].filename);
     }
 
     // Close the socket
-    printf("Collector: bye\n");
     close(sockfd);
 }
 
@@ -110,8 +110,9 @@ Result createResultFromResponse(char* response){
     token = strtok(NULL, " ");
     strcpy(substrings[1], token);
     // Get the first token
-    res.value = (long) isNumber(substrings[0]);
-    strcpy(res.filename,substrings[1]);
+    res.value = isLongNumber(substrings[0]);
+
+    strncpy(res.filename,substrings[1] , 256);
 
     return res;
 }

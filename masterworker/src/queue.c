@@ -26,7 +26,6 @@ int isQueueFull(Queue queue){
 
 void insertNewTask(Queue* queue, Task* task){
     Mutex_lock(&(queue->mtx));
-    //printf("master: waiting to insert new task\n");
     while(isQueueFull(*queue))
         Cond_wait(&(queue->cond_full), &(queue->mtx));
     queue->tasks[queue->count++] = task;

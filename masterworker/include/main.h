@@ -37,6 +37,13 @@ void handleOptions(int argc, char *argv[]);
 void handleDirPathOpt(const char* opt);
 
 /**
+ * @brief handles binary files arguments.
+ * 
+ * @param opt 
+ */
+void handleFileArg(char* arg);
+
+/**
  * @brief checks if a given string is a valid pathname of a directory.
  * 
  * @return int 
@@ -74,7 +81,7 @@ void printOptions();
  * @brief creates a list of filenames inside a given directory, visiting it recursively
  * @return  
  */
-void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList ,int* count);
+void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList);
 
 void closeDir(DIR* dir);
 
@@ -83,11 +90,6 @@ void cleanup();
 void gestore (int signum);
 
 void gestoreUsr1 (int signum);
-
-/**
- * @brief checks if a given file is a binary file
- */
-int isBinaryFile(char* filename);
 
 void destroyAllWorkers();
 
