@@ -8,6 +8,8 @@
 #include "worker.h"
 #include "safe_memory.h"
 #include "macro.h"
+#include "queue.h"
+#include "message_buffer.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -81,7 +83,7 @@ void printOptions();
  * @brief creates a list of filenames inside a given directory, visiting it recursively
  * @return  
  */
-void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList);
+void listFilesInsideDirectoryRec(const char* dirPath);
 
 void closeDir(DIR* dir);
 

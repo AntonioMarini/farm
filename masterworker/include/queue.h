@@ -4,10 +4,14 @@
 #include "task.h"
 #include "safe_memory.h"
 #include "mutex_wrapper.h"
+#include <signal.h>
+
+extern volatile sig_atomic_t terminated;
 
 typedef struct Queue{
     int count;
     int size;
+    int numTasks; // keep track of total number of tasks (also those not in the queue)
     int isOpen; // flag used to block the execution of the tasks in the queue
     pthread_mutex_t mtx;
     pthread_cond_t cond_empty;
@@ -20,7 +24,7 @@ typedef struct Queue{
  * 
  * @return 
  */
-Queue* init_queue(int size);
+Queue* init_queue(int size, int numTasks);
 
 /**
  * @brief check if queue is empty

@@ -52,9 +52,10 @@ generafile.o: generafile.c
 
 clean:
 	rm -f $(OBJDIR_MW)/*.o $(TARGET_FARM)
-	rmdir $(OBJDIR_MW)
+	rm -rf $(OBJDIR_MW)
 	rm -f $(OBJDIR_C)/*.o
-	rmdir $(OBJDIR_C)
+	rm -rf $(OBJDIR_C)
+	rm -f ./*.dat
 
 create_directories:
 	mkdir -p $(OBJDIR_MW)

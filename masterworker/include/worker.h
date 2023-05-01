@@ -3,7 +3,11 @@
 
 #include "queue.h"
 #include "macro.h"
+#include "message_buffer.h"
 
+#include <unistd.h>
+#include <limits.h>
+#include <signal.h>
 
 /**
  * @brief data structure for representing a worker thread
@@ -12,8 +16,7 @@
 typedef struct Worker{
     pthread_t tid;
     int id;
-    int connfd;
-    pthread_mutex_t connectionMtx;
+    MessageBuffer* message_buffer;
     Queue* queue;
 } Worker;
 
@@ -21,17 +24,14 @@ typedef struct Worker{
  * @brief initializes all fields needed for a worker
  * 
  */
-Worker* init_worker(Queue* queue, int id, int connfd, pthread_mutex_t connectionMtx);
+Worker* init_worker(Queue* queue, int id, MessageBuffer* messageBuffer);
 
 void* worker_thread(void* arg);
 
-void processTask(Task* task, int connfd, pthread_mutex_t connectionMtx);
+void processTask(Task* task, MessageBuffer* MessageBuffer);
 
 void destroyWorker(Worker* worker);
 
 char* takeOnlyFileName(char* completePath);
-
-void sendToCollector(int connfd, char* message, pthread_mutex_t connectionMtx);
-
 
 #endif

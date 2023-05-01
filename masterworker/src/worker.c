@@ -1,16 +1,13 @@
 #include "../include/worker.h"
-#include <unistd.h>
-#include <limits.h>
 
 char dataToSend[256];
-pthread_mutex_t mtxSocket; 
+pthread_mutex_t mtxSocket;
 
-Worker* init_worker(Queue* queue, int id, int connfd, pthread_mutex_t connectionMtx){
+Worker* init_worker(Queue* queue, int id, MessageBuffer* messageBuffer){
     Worker* worker = safe_alloc(sizeof(Worker));
     worker->queue = queue;
     worker->id = id;
-    worker->connfd = connfd;
-    worker->connectionMtx = connectionMtx;
+    worker->message_buffer = messageBuffer;
     return worker;
 }
 
@@ -19,18 +16,19 @@ void* worker_thread(void* arg){
     while(1){
         //fprintf(stdout, "worker %d waiting for new task...\n", myData->id);
         Task* task = removeTask(myData->queue);
+        if(task == NULL){
+            return (void*) 0;
+        }
         //fprintf(stdout, "worker %d: processing task %d\n", myData->id, task->task_id);
-        
-        processTask(task, myData->connfd, myData->connectionMtx);
-        //fprintf(stdout, "worker %d: processed ", myData->id);
-        //printTaskInfo(*task);
+
+        processTask(task, myData->message_buffer);
         destroyTask(task);
     }
-
+    //fprintf(stdout, "worker %d thread finished\n", myData->id);
     return (void*) 0;
 }
 
-void processTask(Task* task, int connfd, pthread_mutex_t connectionMtx){
+void processTask(Task* task, MessageBuffer* messageBuffer){
     char* filepath = task->filepath;
     FILE* fp = fopen(filepath, "rb");
     long count = 0;
@@ -42,25 +40,19 @@ void processTask(Task* task, int connfd, pthread_mutex_t connectionMtx){
         return;
     }
 
+        //fprintf(stdout, "reading files\n");
     while (fread(&number, sizeof(long), 1, fp) == 1) {
         // process the long here
-       // printf("count += (%ld * %ld)= ", number, i);
         count+= (number*(i++));
     }
-    
+
     memset(dataToSend, 0, sizeof(dataToSend));
     sprintf(dataToSend, "%ld %s", count, filepath);
-    sendToCollector(connfd, dataToSend, connectionMtx);
 
+    addMessage(messageBuffer, dataToSend);
     fclose(fp);
 }
 
 void destroyWorker(Worker* worker){
     safe_free(worker);
-}
-
-void sendToCollector(int connfd, char* message, pthread_mutex_t connectionMtx){  
-    Mutex_lock(&connectionMtx);
-    error_minusone(write(connfd, message, strlen(message) + 1), "write on socket", pthread_exit((void*) 1));
-    Mutex_unlock(&connectionMtx);
 }

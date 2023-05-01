@@ -1,4 +1,5 @@
 #include "../include/collector.h"
+
 #include "unistd.h"
 #include "../../masterworker/include/macro.h"
 
@@ -6,7 +7,17 @@
 int compare_values(const void* a, const void* b) {
     Result* r1 = (Result*)a;
     Result* r2 = (Result*)b;
-    return r1->value - r2->value;
+
+    long n1 = r1->value;
+    long n2 = r2->value;
+
+    if(n1 < n2){
+        return -1;
+    }else if(n1 > n2){
+        return 1;
+    }else{
+        return 0;
+    }
 }
 
 void collectorCicle(){
@@ -27,39 +38,30 @@ void collectorCicle(){
     while (connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1) {
     }
 
-    char buf[256];
     int numFiles;
-    n = read(sockfd, buf, sizeof(buf));
+    n = read(sockfd, &numFiles, sizeof(int));
     if (n == -1) {
-        perror("read");
+        perror("collector read numfiles ");
         exit(EXIT_FAILURE);
     }
-    buf[n] = '\0';
+    error_minusone(write(sockfd, "OK", 2), "writing number files ack", exit(EXIT_FAILURE));
 
-    numFiles = isNumber(buf);
-    if(numFiles == -1) {
-        printf("Not a number\n");
-        exit(1);
-    }
+    //printf("Number of files: %d\n", numFiles);
 
     Result resultsMap[numFiles];
-    
+
     for(int i = 0; i < numFiles; i++) {
-        memset(buf, 0, sizeof(buf));
+        char buf[512];
         n = read(sockfd, buf, sizeof(buf));
         if (n == -1) {
-            perror("read");
+            perror("collector read message");
             exit(EXIT_FAILURE);
         }
-        buf[n] = '\0';
-
-        if(isMessageBlock(buf)){
-            numFiles -= getRemainingFilesNum(buf);
-            i--;
-        }
-        else {
-            resultsMap[i] = createResultFromResponse(buf);
-         } 
+        //fprintf(stdout, "read %s\n", buf);
+        // Send acknowledgement to the server
+        resultsMap[i] = createResultFromResponse(buf);
+        error_minusone(write(sockfd, "OK", 2), "writing number files ack", exit(EXIT_FAILURE));
+        //fprintf(stdout, "%d files processed\n", i+1);
     }
 
     // Sort the map by value
@@ -70,7 +72,13 @@ void collectorCicle(){
         printf("%ld %s\n",  resultsMap[i].value, resultsMap[i].filename);
     }
 
-    // Close the socket
+    n = write(sockfd, "exit", 5);
+    if (n == -1) {
+        perror("write");
+        exit(EXIT_FAILURE);
+    }
+
+     // Close the socket
     close(sockfd);
 }
 
@@ -78,16 +86,10 @@ int getRemainingFilesNum(char* blockMessage){
     char* delimiter = ":"; // The delimiter is a colon
     char* saveptr;
     char* token;
-
-    // Get the first token using strtok_r
     token = strtok_r(blockMessage, delimiter, &saveptr);
+    token = strtok_r(NULL, delimiter, &saveptr); //  get the number of remaining tasks
 
-    // Get the second token which is the number
-    token = strtok_r(NULL, delimiter, &saveptr);
-
-    // Convert the token to an integer
-    int num = atoi(token);
-
+    int num = atoi(token); // Convert the token to an integer
     return num;
 }
 
@@ -100,16 +102,18 @@ int isMessageBlock(char* message){
 
 Result createResultFromResponse(char* response){
     Result res;
-    
+
     char *token;
     char substrings[2][256];
 
         /* get the first token */
     token = strtok(response, " ");
+
     strcpy(substrings[0], token);
     token = strtok(NULL, " ");
     strcpy(substrings[1], token);
     // Get the first token
+
     res.value = isLongNumber(substrings[0]);
 
     strncpy(res.filename,substrings[1] , 256);

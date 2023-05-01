@@ -36,7 +36,8 @@ void* master_thread(void* arg){
 void createTasksFromFiles(Master* master, char** fileNames){
     master->allTasks = (Task**) safe_alloc(sizeof(Task*) * master->numTasks); 
     for(int i = 0; i < master->numTasks; i++){
-        (master->allTasks[i]) = init_task(fileNames[i], i);      
+        (master->allTasks[i]) = init_task(fileNames[i], i);
+        safe_free(fileNames[i]);
     }
 }
 
@@ -62,6 +63,7 @@ void destroy_master(Master* master){
         t = removeTaskFromMaster(master);
         destroyTask(t);
     }
+
     safe_free(master->allTasks);
     destroyQueue(master->queue);
     safe_free(master);

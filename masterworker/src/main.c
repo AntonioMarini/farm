@@ -1,6 +1,6 @@
 #include "../include/main.h"
 #include "../../collector/include/collector.h"
-#include "../include/util.h"
+#include "../include/utils.h"
 
 #include <unistd.h>
 #include <getopt.h>
@@ -20,14 +20,17 @@ int delayMillis = DEFAULT_DELAY;
 Master* master = NULL;
 Worker** workers;
 Queue* queue = NULL;
+MessageBuffer* messageBuffer =NULL;
 
 char** filesList;
-int numFiles = 0;
+int numTasks = 0;
 
 struct pollfd pfd;
 int sockfd, connfd;
 
 pthread_mutex_t connectionMtx;
+
+extern volatile sig_atomic_t terminated;
 
 int main(int argc, char *argv[])
 {
@@ -35,7 +38,13 @@ int main(int argc, char *argv[])
     handleOptions(argc, argv);    
 
     // list of all files
-    listFilesInsideDirectoryRec(dirPath,&filesList);
+    listFilesInsideDirectoryRec(dirPath);
+
+    // if list of files is empty exit
+    if(numTasks == 0){
+        printf("No files to process\n");
+        exit(1);
+    }
 
     //printOptions();
     pid_t pid = fork();
@@ -45,21 +54,20 @@ int main(int argc, char *argv[])
     } else if(pid == 0){
         // child: set new signal mask and start collector here
         signal(SIGINT, SIG_IGN);
-        signal(SIGQUIT, SIG_IGN);
+        signal(SIGHUP, SIG_IGN);
         signal(SIGQUIT, SIG_IGN);
         signal(SIGTERM, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
 
         collectorCicle();
-        
     }else{
         // MasterWorker must handle SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1
         setSignalHandlers();
 
-        queue = init_queue(queueLength);
+        queue = init_queue(queueLength, numTasks);
         // parent: masterworker
 
-        // initialize the connection 
+        // initialize the connection
         socklen_t len;
         struct sockaddr_un servaddr, cliaddr;
 
@@ -72,7 +80,7 @@ int main(int argc, char *argv[])
         servaddr.sun_family = AF_UNIX;
         strncpy(servaddr.sun_path, SOCKET_PATH, sizeof(servaddr.sun_path) - 1);
         error_minusone(bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)), "bind", exit(EXIT_FAILURE));
-        
+
         // Listen for incoming connections
         error_minusone(listen(sockfd, 5), "listen", exit(EXIT_FAILURE));
 
@@ -80,54 +88,75 @@ int main(int argc, char *argv[])
         len = sizeof(cliaddr);
         error_minusone(connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &len), "accept", exit(EXIT_FAILURE));
 
-        // notify collector process about how many files do we have to work on
-        char buf[256];
-        sprintf(buf,"%d", numFiles);
-        int n = write(connfd, buf, strlen(buf));
-        if(n == -1){
-            perror("write to socket");
-            exit(EXIT_FAILURE);
-        }
-
         // 2) init the Master data struct
-        master = init_master(filesList, queue, numFiles, delayMillis);
-        
-        // 3) init the workers threadpool
+        master = init_master(filesList, queue, numTasks, delayMillis);
+
+        // 3) init the messagesBuffer struct
+        messageBuffer = init_message_buffer();
+
+        // 4) init the workers threadpool
         Mutex_init(&connectionMtx);
         workers = (Worker**) safe_alloc(sizeof(Worker*) * numWorkers);
         for(int i = 0; i < numWorkers; i++){
-            workers[i] = init_worker(queue, i, connfd, connectionMtx);
+            workers[i] = init_worker(queue, i, messageBuffer);
         }
 
         // 4) start the master thread
         start_master(master);
 
-                // 5) start the workers threadpool
-
+        // 5) start the workers threadpool
         for(int i = 0; i < numWorkers; i++)
             Thread_create(&(workers[i]->tid), worker_thread, workers[i]);
-        
-        Thread_join(master->tid, NULL);
-        // monitor the socket for events
-        pfd.fd = connfd;
-        pfd.events = POLLIN | POLLHUP | POLLERR;
-        while (1) {
-            // wait for an event
-            if (poll(&pfd, 1, -1) == -1) {
-                perror("poll");
-            }
 
-            if (pfd.revents & POLLHUP) {
-                // client has closed the connection
-                close(connfd);
-                break;
-            } else if (pfd.revents & POLLERR) {
-                // an error has occurred
+        Thread_join(master->tid, NULL);
+
+        //printf("waiting for workers threads to terminate\n");
+        for(int i = 0; i < numWorkers; i++){
+            Thread_join((workers[i]->tid), NULL);
+            //printf("joined worker %d\n",(int) workers[i]->tid);
+        }
+
+        //printf("all workers terminated\n");
+        //printMessageBuffer(messageBuffer);
+
+        // notify collector process about how many files do we have to work on
+        Mutex_lock(&(messageBuffer->mtx));
+        int totalFiles = messageBuffer->count;
+        Mutex_unlock(&(messageBuffer->mtx));
+        error_minusone(write(connfd, &(totalFiles), sizeof(int)), "writing to collector number of files failed", exit(EXIT_FAILURE));
+
+        char ack[2];
+        error_minusone(read(connfd, ack, sizeof(ack)), "reading number files ack failed", exit(EXIT_FAILURE));
+
+        for(int i = 0; i < messageBuffer->count; i++){
+            char buf[512];
+            sprintf(buf,"%s", messageBuffer->messages[i]);
+            error_minusone(write(connfd, buf, strlen(buf) + 1), "write on socket", exit(EXIT_FAILURE));
+
+            char ack[2];
+            error_minusone(read(connfd, ack, sizeof(ack)), "reading ack for a message sent failed", exit(EXIT_FAILURE));
+        }
+
+        // let server wait collector to send an exit message to terminate.
+        int client_exited = 0;
+        while(!client_exited){
+            //printf("waiting for collector to terminate\n");
+            char buf[512];
+            int n = read(connfd, buf, sizeof(buf));
+            if (n == -1) {
+                perror("masterworker read exit");
                 exit(EXIT_FAILURE);
+            }
+            buf[n] = '\0';
+
+            if((strncmp(buf, "exit", 5)) == 0){
+                //printf("client exited\n");
+                client_exited = 1;
             }
         }
 
         // Close the connection and the socket
+        pthread_mutex_destroy(&connectionMtx);
         close(connfd);
         close(sockfd);
 
@@ -194,7 +223,7 @@ void handleOptions(int argc, char *argv[]){
         }
     }
 
-    for (int i = optind; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         handleFileArg(argv[i]);
     }
     
@@ -239,24 +268,22 @@ void handleDirPathOpt(const char* opt){
     }
 }
 
-void hadleFileArg(char* arg){
+void handleFileArg(char* arg){
     if(!is_regular_binary_file(arg)){
-        printf("%s isn't a binary file\n", arg);
-        exit(1);
+        return;
     }
 
     // add this to filesList
-    filesList = (char**) safe_realloc((filesList), (numFiles + 1) * sizeof(char*));
-    filesList[numFiles] = safe_alloc(strlen(arg) + 1);
-    strncpy((filesList)[numFiles], arg, strlen(arg) + 1);
-    numFiles++;
+    filesList = (char**) safe_realloc((filesList), (numTasks + 1) * sizeof(char*));
+    filesList[numTasks] = safe_alloc(strlen(arg) + 1);
+    strncpy((filesList)[numTasks], arg, strlen(arg) + 1);
+    numTasks++;
 
 }
 
 int isValidDirPath(const char* fileName)
 {
     struct stat stats;
-
     stat(fileName, &stats);
 
     // Check for file existence
@@ -274,12 +301,12 @@ void printOptions(){
         printf("directory path: %s\n", dirPath);
 }
 
-void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList){
+void listFilesInsideDirectoryRec(const char* dirPath){
     DIR* dir;
     struct dirent* dirFile;
 
     if(strncmp(dirPath, "", 1) == 0)
-        dirPath = ".";
+        return;
 
     if((dir = opendir(dirPath)) == NULL){
         perror("Opening directory");
@@ -298,21 +325,16 @@ void listFilesInsideDirectoryRec(const char* dirPath, char*** filesList){
 
         // if the entry is a directory, recursively traverse it
         if (dirFile->d_type == 4) {
-            listFilesInsideDirectoryRec(fullPath, filesList);
+            listFilesInsideDirectoryRec(fullPath);
         }
         // if the entry is a file and has a .dat extension, add its name to the list
-        else if (dirFile->d_type == 8 && is_regular_binary_file(dirFile->d_name)) {
-            (*filesList) = (char**) safe_realloc((*filesList), ( + 1) * sizeof(char*));
-            (*filesList)[numFiles] = safe_alloc(strlen(fullPath) + 1);
-            strncpy((*filesList)[numFiles], fullPath, strlen(fullPath) + 1);
-            numFiles++;           
+        else if (dirFile->d_type == 8) {
+            numTasks++;
+            filesList = (char**) safe_realloc(filesList, numTasks * sizeof(char*));
+            filesList[numTasks-1] = strndup(fullPath, 255);
         }
 
         safe_free(fullPath);
-    }
-    if (errno != 0) {
-        perror("Reading directory");
-        exit(1);
     }
 
     closeDir(dir);
@@ -327,7 +349,8 @@ void closeDir(DIR* dir){
 
 void cleanup(){
     destroy_master(master);
-    destroyAllWorkers(); 
+    destroyMessageBuffer(messageBuffer);
+    destroyAllWorkers();
     safe_free(filesList);
 }
 
@@ -335,15 +358,7 @@ void cleanup(){
 
 void gestore (int signum) {
     // blocca la coda dei tasks.
-    // manda un messaggio al collector con il numero di file che non verranno calcolati
-    // in modo che esso possa aggiornare il suo ciclo di attesa
     closeQueue(master->queue);
-    char dataToSend[256];
-    memset(dataToSend, 0, sizeof(dataToSend));
-    int countRemaining = master->numTasks;
-    printf("Sending tasks remaining: %d\n", countRemaining);
-    sprintf(dataToSend, "block:%d", countRemaining);
-    error_minusone(write(connfd, dataToSend, strlen(dataToSend) + 1), "write on socket", pthread_exit((void*) 1));
 }
 
 void gestoreUsr1 (int signum) {
@@ -356,7 +371,6 @@ void gestoreUsr1 (int signum) {
 
 void destroyAllWorkers(){
     for(int i = 0; i < numWorkers; i++){
-        error_minusone(pthread_cancel(workers[i]->tid), "kill thread", exit(EXIT_FAILURE));
         destroyWorker(workers[i]);
     }
     safe_free(workers);

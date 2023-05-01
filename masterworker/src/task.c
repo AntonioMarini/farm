@@ -4,7 +4,7 @@
 
 Task* init_task(char* filepath, int task_id){
     Task* task = safe_alloc(sizeof(Task));
-    task->filepath = filepath;
+    task->filepath = strdup(filepath);
     task->task_id = task_id;
     return task;
 }
