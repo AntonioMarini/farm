@@ -34,8 +34,8 @@ extern volatile sig_atomic_t terminated;
 
 int main(int argc, char *argv[])
 {
-    //1)
-    handleOptions(argc, argv);    
+    //1) handle and validate options
+    handleOptions(argc, argv);
 
     // list of all files
     listFilesInsideDirectoryRec(dirPath);
@@ -59,7 +59,14 @@ int main(int argc, char *argv[])
         signal(SIGTERM, SIG_IGN);
         signal(SIGHUP, SIG_IGN);
 
+        signal(SIGPIPE, SIG_IGN);
+
+
         collectorCicle();
+        for(int i = 0; i < numTasks; i++){
+            safe_free(filesList[i]);
+        }
+        safe_free(filesList);
     }else{
         // MasterWorker must handle SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1
         setSignalHandlers();
@@ -88,23 +95,23 @@ int main(int argc, char *argv[])
         len = sizeof(cliaddr);
         error_minusone(connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &len), "accept", exit(EXIT_FAILURE));
 
-        // 2) init the Master data struct
+        //init the Master data struct
         master = init_master(filesList, queue, numTasks, delayMillis);
 
-        // 3) init the messagesBuffer struct
+        //init the messagesBuffer struct
         messageBuffer = init_message_buffer();
 
-        // 4) init the workers threadpool
+        //init the workers threadpool
         Mutex_init(&connectionMtx);
         workers = (Worker**) safe_alloc(sizeof(Worker*) * numWorkers);
         for(int i = 0; i < numWorkers; i++){
             workers[i] = init_worker(queue, i, messageBuffer);
         }
 
-        // 4) start the master thread
+        //start the master thread
         start_master(master);
 
-        // 5) start the workers threadpool
+        //start the workers threadpool
         for(int i = 0; i < numWorkers; i++)
             Thread_create(&(workers[i]->tid), worker_thread, workers[i]);
 
@@ -123,18 +130,24 @@ int main(int argc, char *argv[])
         Mutex_lock(&(messageBuffer->mtx));
         int totalFiles = messageBuffer->count;
         Mutex_unlock(&(messageBuffer->mtx));
-        error_minusone(write(connfd, &(totalFiles), sizeof(int)), "writing to collector number of files failed", exit(EXIT_FAILURE));
+        error_minusone(write(connfd, &(totalFiles), sizeof(int)), "writing to collector number of files failed",
+        if(errno==EPIPE){close(connfd); close(sockfd); perror("Pipe broken:"); cleanup(); exit(EXIT_FAILURE);}
+        else{cleanup();exit(EXIT_FAILURE);}); ;
 
         char ack[2];
-        error_minusone(read(connfd, ack, sizeof(ack)), "reading number files ack failed", exit(EXIT_FAILURE));
+        error_minusone(read(connfd, ack, sizeof(ack)), "reading number files ack failed",cleanup(); exit(EXIT_FAILURE));
 
         for(int i = 0; i < messageBuffer->count; i++){
             char buf[512];
             sprintf(buf,"%s", messageBuffer->messages[i]);
-            error_minusone(write(connfd, buf, strlen(buf) + 1), "write on socket", exit(EXIT_FAILURE));
+            error_minusone(write(connfd, buf, strlen(buf) + 1), "write on socket",
+            if(errno==EPIPE){close(connfd); close(sockfd); perror("Pipe broken:"); cleanup(); exit(EXIT_FAILURE);}
+            else{cleanup();exit(EXIT_FAILURE);});
 
             char ack[2];
-            error_minusone(read(connfd, ack, sizeof(ack)), "reading ack for a message sent failed", exit(EXIT_FAILURE));
+            error_minusone(read(connfd, ack, sizeof(ack)), "reading ack for a message sent failed",
+            if(errno==EPIPE){close(connfd); close(sockfd); perror("Pipe broken:"); cleanup(); exit(EXIT_FAILURE);}
+            else{cleanup();exit(EXIT_FAILURE);});
         }
 
         // let server wait collector to send an exit message to terminate.
@@ -145,6 +158,9 @@ int main(int argc, char *argv[])
             int n = read(connfd, buf, sizeof(buf));
             if (n == -1) {
                 perror("masterworker read exit");
+                close(connfd);
+                close(sockfd);
+                cleanup();
                 exit(EXIT_FAILURE);
             }
             buf[n] = '\0';
@@ -168,19 +184,21 @@ int main(int argc, char *argv[])
 }
 
 void setSignalHandlers(){
-    struct sigaction s; 
+    struct sigaction s;
     memset( &s, 0, sizeof(s) );
-    s.sa_handler=gestore; 
+    s.sa_handler=gestore;
 
-    error_minusone(sigaction(SIGINT,&s,NULL), "sigaction", exit(EXIT_FAILURE));
-    error_minusone(sigaction(SIGHUP,&s,NULL), "sigaction", exit(EXIT_FAILURE));
-    error_minusone(sigaction(SIGQUIT,&s,NULL), "sigaction", exit(EXIT_FAILURE));
-    error_minusone(sigaction(SIGTERM,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+    signal(SIGPIPE, SIG_IGN);
 
-    struct sigaction sUsr; 
+    error_minusone(sigaction(SIGINT,&s,NULL), "sigaction", cleanup(); exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGHUP,&s,NULL), "sigaction", cleanup(); exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGQUIT,&s,NULL), "sigaction", cleanup(); exit(EXIT_FAILURE));
+    error_minusone(sigaction(SIGTERM,&s,NULL), "sigaction", cleanup(); exit(EXIT_FAILURE));
+
+    struct sigaction sUsr;
         memset( &sUsr, 0, sizeof(sUsr) );
-        sUsr.sa_handler=gestoreUsr1; 
-    error_minusone(sigaction(SIGUSR1,&s,NULL), "sigaction", exit(EXIT_FAILURE));
+        sUsr.sa_handler=gestoreUsr1;
+    error_minusone(sigaction(SIGUSR1,&s,NULL), "sigaction",cleanup(); exit(EXIT_FAILURE));
 }
 
 void handleOptions(int argc, char *argv[]){
@@ -211,10 +229,12 @@ void handleOptions(int argc, char *argv[]){
             }
             case ':':{
                 printf("Option %c needs argument!\n", optopt);
+                cleanup();
                 exit(1);
             }
             case '?':{
                 printf("Option %c not recognized!\n", optopt);
+                cleanup();
                 exit(1);
             }
             default:{
@@ -226,13 +246,14 @@ void handleOptions(int argc, char *argv[]){
     for (int i = 1; i < argc; i++) {
         handleFileArg(argv[i]);
     }
-    
+
 }
 
 void handleNumWorkersOpt(const char* opt){
     int n;
     if((n = isNumber(opt)) == -1){
         printf("Invalid option n, should be a number\n");
+        cleanup();
         exit(1);
     }
     numWorkers = n;
@@ -241,7 +262,8 @@ void handleNumWorkersOpt(const char* opt){
 void handleQueueLengthOpt(const char* opt){
     int q;
     if((q = isNumber(opt)) == -1){
-        printf("Invalid option n, should be a number\n");
+        printf("Invalid option q, should be a number\n");
+        cleanup();
         exit(1);
     }
     queueLength = q;
@@ -250,7 +272,8 @@ void handleQueueLengthOpt(const char* opt){
 void handleDelayOpt(const char* opt){
     int delay;
     if((delay = isNumber(opt)) == -1){
-        printf("Invalid option n, should be a number\n");
+        printf("Invalid option t, should be a number\n");
+        cleanup();
         exit(1);
     }
     delayMillis = delay;
@@ -259,11 +282,13 @@ void handleDelayOpt(const char* opt){
 void handleDirPathOpt(const char* opt){
     if(strlen(opt)>MAX_PATH){
         printf("Too large directory path\n");
+        cleanup();
         exit(1);
     }
     strncpy(dirPath, opt, MAX_PATH);
     if(!isValidDirPath(dirPath)){
         printf("%s isn't a directory path\n", dirPath);
+        cleanup();
         exit(1);
     }
 }
@@ -310,8 +335,9 @@ void listFilesInsideDirectoryRec(const char* dirPath){
 
     if((dir = opendir(dirPath)) == NULL){
         perror("Opening directory");
-        exit(EXIT_FAILURE); 
-    } 
+        cleanup();
+        exit(EXIT_FAILURE);
+    }
     errno = 0;
     while ((dirFile = readdir(dir))!=NULL) {
         if(strncmp(dirFile->d_name, ".", 1) == 0) continue;
@@ -343,8 +369,9 @@ void listFilesInsideDirectoryRec(const char* dirPath){
 void closeDir(DIR* dir){
     if(closedir(dir) == -1){
         perror("Closing directory");
-        exit(EXIT_FAILURE); 
-    } 
+        cleanup();
+        exit(EXIT_FAILURE);
+    }
 }
 
 void cleanup(){

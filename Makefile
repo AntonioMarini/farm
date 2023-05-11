@@ -22,7 +22,11 @@ OBJ_C = $(patsubst $(SRCDIR_C)/%.c, $(OBJDIR_C)/%.o, $(SRC_C))
 
 INC_C = -I$(INCDIR_C)
 
+SRC_GENERAFILE = generafile.c
+
 TARGET_FARM = farm
+
+TARGET_GENERAFILE = generafile
 
 all: create_directories $(TARGET_FARM)
 
@@ -50,12 +54,17 @@ generafile: generafile.o
 generafile.o: generafile.c
 	$(CC) -g $(CFLAGS) -c $< -o $@
 
+test: generafile all
+	./test.sh
+
 clean:
 	rm -f $(OBJDIR_MW)/*.o $(TARGET_FARM)
 	rm -rf $(OBJDIR_MW)
 	rm -f $(OBJDIR_C)/*.o
 	rm -rf $(OBJDIR_C)
 	rm -f ./*.dat
+	rm -f ./*.o
+	rm -f ./*.txt
 
 create_directories:
 	mkdir -p $(OBJDIR_MW)

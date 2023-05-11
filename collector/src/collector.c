@@ -44,7 +44,10 @@ void collectorCicle(){
         perror("collector read numfiles ");
         exit(EXIT_FAILURE);
     }
-    error_minusone(write(sockfd, "OK", 2), "writing number files ack", exit(EXIT_FAILURE));
+
+    error_minusone(write(sockfd, "OK", 2), "writing number files ack",
+        if(errno==EPIPE){ close(sockfd); perror("Pipe broken:"); exit(EXIT_FAILURE);}
+        else{exit(EXIT_FAILURE);});
 
     //printf("Number of files: %d\n", numFiles);
 
@@ -60,7 +63,9 @@ void collectorCicle(){
         //fprintf(stdout, "read %s\n", buf);
         // Send acknowledgement to the server
         resultsMap[i] = createResultFromResponse(buf);
-        error_minusone(write(sockfd, "OK", 2), "writing number files ack", exit(EXIT_FAILURE));
+        error_minusone(write(sockfd, "OK", 2), "writing number files ack",
+        if(errno==EPIPE){ close(sockfd); perror("Pipe broken:"); exit(EXIT_FAILURE);}
+        else{exit(EXIT_FAILURE);});
         //fprintf(stdout, "%d files processed\n", i+1);
     }
 
@@ -74,8 +79,8 @@ void collectorCicle(){
 
     n = write(sockfd, "exit", 5);
     if (n == -1) {
-        perror("write");
-        exit(EXIT_FAILURE);
+        if(errno==EPIPE){ close(sockfd); perror("Pipe broken:"); exit(EXIT_FAILURE);}
+        else{perror("write on socket:"); exit(EXIT_FAILURE);}
     }
 
      // Close the socket
@@ -88,7 +93,6 @@ int getRemainingFilesNum(char* blockMessage){
     char* token;
     token = strtok_r(blockMessage, delimiter, &saveptr);
     token = strtok_r(NULL, delimiter, &saveptr); //  get the number of remaining tasks
-
     int num = atoi(token); // Convert the token to an integer
     return num;
 }

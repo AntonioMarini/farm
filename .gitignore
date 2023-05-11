@@ -47,6 +47,9 @@
 *.cmd
 *.json
 *.dat
+*.txt
+testdir/
+farm
 .tmp_versions/
 modules.order
 Module.symvers
